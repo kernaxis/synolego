@@ -6,12 +6,12 @@ The default branch is `main`. Ordinary CI never cross-compiles or packages a rel
 | --- | --- | --- |
 | CI | PR to `main`, push to `main`, manual, reusable call | Formatting, vet, minimal lint, tests with coverage, race detection on Linux amd64 |
 | Security | PR, push to `main`, daily, manual, reusable call | govulncheck on Linux amd64; workflow validation and Dependency Review where applicable |
-| CodeQL | PR, push to `main`, weekly, manual | Go analysis without a separate build |
+| CodeQL | PR, push to `main`, weekly, manual | Go analysis with one native build |
 | Release | Version tag push or manual dispatch with an existing tag | Tag validation, CI and security gates, four Linux archives, checksums, draft release |
 
 Go comes from `go.mod`. The current module/toolchain and dependencies are not
-upgraded by these workflows. Lint tools are pinned: golangci-lint v2.1.6,
-govulncheck v1.1.4 (compatible with the current Go toolchain), actionlint v1.7.7,
+upgraded by these workflows. Lint tools are pinned: golangci-lint v2.15.0,
+govulncheck v1.9.0 (compatible with the current Go toolchain), actionlint v1.7.7,
 and zizmor v1.6.0. Revisit tool versions when upgrading Go. Dependabot opens
 weekly PRs for Go dependencies and Actions; it does not merge them automatically.
 
@@ -29,6 +29,10 @@ without rewriting files. No arbitrary coverage threshold is enforced. Tests use
 temporary files and synthetic certificates, not live ACME/DNS/DSM credentials.
 govulncheck fails for reachable vulnerabilities or scanner/database errors; no
 security check is silently allowed to fail.
+
+CodeQL uses the same Go toolchain and a manual `go build -mod=readonly ./...`
+between initialization and analysis. This native build supplies its Go database;
+cross-compilation and packaging remain exclusive to releases.
 
 ## Preparing a release
 
