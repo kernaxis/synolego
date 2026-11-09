@@ -15,7 +15,7 @@ import (
 	"github.com/go-acme/lego/v4/certificate"
 	"github.com/go-acme/lego/v4/lego"
 	"github.com/go-acme/lego/v4/log"
-	"github.com/kernaxis/synolego/synology"
+	"github.com/kernaxis/synolego/internal/synology"
 	"github.com/mattn/go-isatty"
 	"github.com/urfave/cli/v2"
 )

@@ -8,7 +8,7 @@ import (
 	"runtime"
 
 	"github.com/go-acme/lego/v4/log"
-	"github.com/kernaxis/synolego/cmd"
+	"github.com/kernaxis/synolego/internal/cmd"
 	"github.com/urfave/cli/v2"
 )
 
