@@ -1,0 +1,163 @@
+name: Release
+'on':
+  push:
+    tags:
+    - v*
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag, e.g. v1.0.0 or v1.1.0-rc.1
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      sha: ${{ steps.tag.outputs.sha }}
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      with:
+        persist-credentials: false
+        fetch-depth: 0
+    - name: Validate tag and main ancestry
+      run: |
+        set -euo pipefail
+        if [[ ! "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.(0|[1-9][0-9]*))?$ ]]; then
+          echo 'Expected vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-rc.N' >&2
+          exit 1
+        fi
+        sha=$(git rev-parse --verify "refs/tags/$TAG^{commit}")
+        git merge-base --is-ancestor "$sha" refs/remotes/origin/main
+        printf 'tag=%s\nsha=%s\n' "$TAG" "$sha" >> "$GITHUB_OUTPUT"
+      env:
+        TAG: ${{ inputs.tag || github.ref_name }}
+      id: tag
+  ci:
+    needs: validate
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.validate.outputs.sha }}
+  security:
+    needs: validate
+    uses: ./.github/workflows/security.yml
+    with:
+      ref: ${{ needs.validate.outputs.sha }}
+      release: true
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    needs:
+    - validate
+    - ci
+    - security
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+        - amd64
+        - '386'
+        - arm
+        - arm64
+    env:
+      VERSION: ${{ needs.validate.outputs.tag }}
+      GOOS: linux
+      GOARCH: ${{ matrix.arch }}
+      GOARM: '7'
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      with:
+        persist-credentials: false
+        ref: ${{ needs.validate.outputs.sha }}
+    - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+      with:
+        go-version-file: go.mod
+        cache: false
+    - name: Install license packaging tool for the runner
+      run: GOOS="$(go env GOHOSTOS)" GOARCH="$(go env GOHOSTARCH)" CGO_ENABLED=0 go install github.com/google/go-licenses/v2@v2.0.1
+    - run: make package
+    - name: Smoke-test native binary
+      if: matrix.arch == 'amd64'
+      run: |
+        binary="dist/synolego_${VERSION#v}_linux_amd64/synolego"
+        "$binary" --version | grep -F "synolego version $VERSION linux/amd64"
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      with:
+        name: release-${{ needs.validate.outputs.sha }}-${{ github.run_attempt }}-${{ matrix.arch }}
+        path: dist/*.tar.gz
+        if-no-files-found: error
+        retention-days: 7
+  publish-draft:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    needs:
+    - validate
+    - build
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ needs.validate.outputs.tag }}
+    steps:
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      with:
+        pattern: release-${{ needs.validate.outputs.sha }}-${{ github.run_attempt }}-*
+        merge-multiple: true
+        path: dist
+    - name: Verify all archives and generate checksums
+      run: |
+        set -euo pipefail
+        cd dist
+        version="${TAG#v}"
+        expected=()
+        for arch in amd64 386 armv7 arm64; do
+          expected+=("synolego_${version}_linux_${arch}.tar.gz")
+        done
+        for file in "${expected[@]}"; do test -s "$file"; done
+        count=$(find . -maxdepth 1 -type f -name '*.tar.gz' | wc -l)
+        test "$count" -eq 4
+        sha256sum "${expected[@]}" > SHA256SUMS
+        sha256sum --check SHA256SUMS
+    - name: Refuse to overwrite an existing release
+      run: |
+        python3 - <<'PY_CHECK'
+        import json, os, urllib.error, urllib.request
+        page = 1
+        while True:
+            url = os.environ['GH_API_URL'] + '/repos/' + os.environ['GH_REPO'] + '/releases?per_page=100&page=' + str(page)
+            request = urllib.request.Request(url, headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'], 'Accept': 'application/vnd.github+json'})
+            try:
+                with urllib.request.urlopen(request, timeout=30) as response:
+                    releases = json.load(response)
+            except urllib.error.HTTPError as error:
+                raise SystemExit('Cannot verify release status: HTTP ' + str(error.code))
+            if not isinstance(releases, list):
+                raise SystemExit('Unexpected release API response')
+            if any(release.get('tag_name') == os.environ['TAG'] for release in releases):
+                raise SystemExit('A release or draft already exists for this tag; no assets will be overwritten')
+            if len(releases) < 100:
+                break
+            page += 1
+        PY_CHECK
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GH_REPO: ${{ github.repository }}
+        GH_API_URL: ${{ github.api_url }}
+    - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+      with:
+        tag_name: ${{ needs.validate.outputs.tag }}
+        target_commitish: ${{ needs.validate.outputs.sha }}
+        name: Synolego ${{ needs.validate.outputs.tag }}
+        draft: true
+        prerelease: ${{ contains(needs.validate.outputs.tag, '-rc.') }}
+        generate_release_notes: true
+        fail_on_unmatched_files: true
+        overwrite_files: false
+        files: |
+          dist/*.tar.gz
+          dist/SHA256SUMS

@@ -1,0 +1,5 @@
+dist/
+coverage.out
+__pycache__/
+THIRD_PARTY_LICENSES.txt
+MPL-2.0-SOURCES.tar.gz
