@@ -7,7 +7,7 @@ toolchain go1.26.10
 require (
 	github.com/go-acme/lego/v4 v4.25.2
 	github.com/hashicorp/go-retryablehttp v0.7.8
-	github.com/mattn/go-isatty v0.0.20
+	github.com/mattn/go-isatty v0.0.24
 	github.com/urfave/cli/v2 v2.27.7
 	golang.org/x/net v0.60.0
 	software.sslmate.com/src/go-pkcs12 v0.6.0
