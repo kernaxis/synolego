@@ -6,7 +6,7 @@ name: Release
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing version tag, e.g. v1.0.0 or v1.1.0-rc.1
+        description: Version to release, e.g. v1.0.0 or v1.1.0-rc.1 (new tag created after successful builds)
         required: true
         type: string
 permissions:
@@ -21,23 +21,47 @@ jobs:
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
       sha: ${{ steps.tag.outputs.sha }}
+      create_tag: ${{ steps.tag.outputs.create_tag }}
     steps:
     - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       with:
         persist-credentials: false
         fetch-depth: 0
-    - name: Validate tag and main ancestry
+    - name: Validate version and release commit
       run: |
         set -euo pipefail
         if [[ ! "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.(0|[1-9][0-9]*))?$ ]]; then
           echo 'Expected vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-rc.N' >&2
           exit 1
         fi
-        sha=$(git rev-parse --verify "refs/tags/$TAG^{commit}")
+        if [[ "$EVENT_NAME" == workflow_dispatch && "$SOURCE_REF" != refs/heads/main ]]; then
+          echo 'Run this workflow from main' >&2
+          exit 1
+        fi
+        create_tag=false
+        if git show-ref --verify --quiet "refs/tags/$TAG"; then
+          sha=$(git rev-parse --verify "refs/tags/$TAG^{commit}")
+          if [[ "$EVENT_NAME" == push ]]; then
+            event_sha=$(git rev-parse --verify "$SOURCE_SHA^{commit}")
+            if [[ "$sha" != "$event_sha" ]]; then
+              echo 'The tag no longer matches the triggering commit' >&2
+              exit 1
+            fi
+          fi
+        elif [[ "$EVENT_NAME" == workflow_dispatch ]]; then
+          sha=$(git rev-parse --verify "$SOURCE_SHA^{commit}")
+          create_tag=true
+        else
+          echo 'The pushed tag no longer exists' >&2
+          exit 1
+        fi
         git merge-base --is-ancestor "$sha" refs/remotes/origin/main
-        printf 'tag=%s\nsha=%s\n' "$TAG" "$sha" >> "$GITHUB_OUTPUT"
+        printf 'tag=%s\nsha=%s\ncreate_tag=%s\n' "$TAG" "$sha" "$create_tag" >> "$GITHUB_OUTPUT"
       env:
         TAG: ${{ inputs.tag || github.ref_name }}
+        EVENT_NAME: ${{ github.event_name }}
+        SOURCE_REF: ${{ github.ref }}
+        SOURCE_SHA: ${{ github.sha }}
       id: tag
   ci:
     needs: validate
@@ -103,6 +127,8 @@ jobs:
       contents: write
     env:
       TAG: ${{ needs.validate.outputs.tag }}
+      SHA: ${{ needs.validate.outputs.sha }}
+      CREATE_TAG: ${{ needs.validate.outputs.create_tag }}
     steps:
     - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
       with:
@@ -123,19 +149,32 @@ jobs:
         test "$count" -eq 4
         sha256sum "${expected[@]}" > SHA256SUMS
         sha256sum --check SHA256SUMS
-    - name: Refuse to overwrite an existing release
+    - name: Check release status and prepare tag
       run: |
         python3 - <<'PY_CHECK'
         import json, os, urllib.error, urllib.request
-        page = 1
-        while True:
-            url = os.environ['GH_API_URL'] + '/repos/' + os.environ['GH_REPO'] + '/releases?per_page=100&page=' + str(page)
-            request = urllib.request.Request(url, headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'], 'Accept': 'application/vnd.github+json'})
+        base = os.environ['GH_API_URL'] + '/repos/' + os.environ['GH_REPO']
+        headers = {'Authorization': 'Bearer ' + os.environ['GH_TOKEN'], 'Accept': 'application/vnd.github+json'}
+
+        def api(path, data=None, missing_ok=False):
+            body = None if data is None else json.dumps(data).encode()
+            request = urllib.request.Request(base + path, data=body, headers=headers)
+            if data is not None:
+                request.add_header('Content-Type', 'application/json')
             try:
                 with urllib.request.urlopen(request, timeout=30) as response:
-                    releases = json.load(response)
+                    result = json.load(response)
+                    if not isinstance(result, (dict, list)):
+                        raise SystemExit('Unexpected release API response')
+                    return result
             except urllib.error.HTTPError as error:
-                raise SystemExit('Cannot verify release status: HTTP ' + str(error.code))
+                if missing_ok and error.code == 404:
+                    return None
+                raise SystemExit('Release preparation failed: HTTP ' + str(error.code))
+
+        page = 1
+        while True:
+            releases = api('/releases?per_page=100&page=' + str(page))
             if not isinstance(releases, list):
                 raise SystemExit('Unexpected release API response')
             if any(release.get('tag_name') == os.environ['TAG'] for release in releases):
@@ -143,6 +182,18 @@ jobs:
             if len(releases) < 100:
                 break
             page += 1
+
+        ref = api('/git/ref/tags/' + os.environ['TAG'], missing_ok=True)
+        if ref is None:
+            if os.environ['CREATE_TAG'] != 'true':
+                raise SystemExit('The existing release tag was deleted; it will not be recreated')
+            api('/git/refs', {'ref': 'refs/tags/' + os.environ['TAG'], 'sha': os.environ['SHA']})
+        else:
+            target = ref['object']
+            while target['type'] == 'tag':
+                target = api('/git/tags/' + target['sha'])['object']
+            if target['type'] != 'commit' or target['sha'] != os.environ['SHA']:
+                raise SystemExit('The release tag no longer points to the validated commit')
         PY_CHECK
       env:
         GH_TOKEN: ${{ github.token }}
