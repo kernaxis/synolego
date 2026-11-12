@@ -42,13 +42,31 @@ jobs:
     - name: Install govulncheck
       run: go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
     - name: Check reachable vulnerabilities
-      run: make vulncheck
+      run: |
+        if [[ "$REPORT_FINDINGS" != true ]]; then
+          make vulncheck
+          exit
+        fi
+        set +e
+        govulncheck -json ./... > "$RUNNER_TEMP/govuln.jsonl"
+        scan_status=$?
+        set -e
+        python3 .github/scripts/security_reports.py govulncheck "$RUNNER_TEMP/govuln.jsonl" "$RUNNER_TEMP/govuln-report.json" "$scan_status"
       env:
+        REPORT_FINDINGS: ${{ github.ref == 'refs/heads/main' && !inputs.release && inputs.ref == '' }}
         GOOS: linux
         GOARCH: ${{ matrix.arch }}
         GOARM: '7'
         CGO_ENABLED: '0'
         GOFLAGS: -mod=readonly
+    - name: Store Go vulnerability findings
+      if: always() && github.ref == 'refs/heads/main' && !inputs.release && inputs.ref == ''
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: security-report-govulncheck
+        path: ${{ runner.temp }}/govuln-report.json
+        if-no-files-found: ignore
+        retention-days: 1
   workflow-security:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -63,11 +81,59 @@ jobs:
         go-version-file: go.mod
     - run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
     - run: actionlint
+    - name: Test security reporting scripts
+      run: python3 -m unittest discover -s .github/scripts -p 'test_*.py'
     - name: Check workflow security
       run: |
         python3 -m venv "$RUNNER_TEMP/zizmor"
         "$RUNNER_TEMP/zizmor/bin/pip" install --disable-pip-version-check zizmor==1.6.0
-        "$RUNNER_TEMP/zizmor/bin/zizmor" --offline .github/workflows
+        if [[ "$REPORT_FINDINGS" != true ]]; then
+          "$RUNNER_TEMP/zizmor/bin/zizmor" --offline .github/workflows
+          exit
+        fi
+        set +e
+        "$RUNNER_TEMP/zizmor/bin/zizmor" --offline --format=sarif .github/workflows > "$RUNNER_TEMP/zizmor.sarif"
+        scan_status=$?
+        set -e
+        python3 .github/scripts/security_reports.py zizmor "$RUNNER_TEMP/zizmor.sarif" "$RUNNER_TEMP/zizmor-report.json" "$scan_status"
+      env:
+        REPORT_FINDINGS: ${{ github.ref == 'refs/heads/main' && !inputs.release && inputs.ref == '' }}
+    - name: Store workflow findings
+      if: always() && github.ref == 'refs/heads/main' && !inputs.release && inputs.ref == ''
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: security-report-zizmor
+        path: ${{ runner.temp }}/zizmor-report.json
+        if-no-files-found: ignore
+        retention-days: 1
+  finding-issues:
+    if: always() && github.ref == 'refs/heads/main' && !inputs.release && inputs.ref == ''
+    needs: [workflow-security, govulncheck]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    concurrency:
+      group: security-finding-issues
+      cancel-in-progress: false
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      with:
+        persist-credentials: false
+        ref: main
+    - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      with:
+        pattern: security-report-*
+        path: ${{ runner.temp }}/security-reports
+        merge-multiple: true
+      continue-on-error: true
+    - name: Reconcile finding issues
+      env:
+        GH_TOKEN: ${{ github.token }}
+        REPORT_DIR: ${{ runner.temp }}/security-reports
+        SCANNED_SHA: ${{ github.sha }}
+      run: python3 .github/scripts/sync_security_issues.py
   dependency-review:
     runs-on: ubuntu-24.04
     timeout-minutes: 10

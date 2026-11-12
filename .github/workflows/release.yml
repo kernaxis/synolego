@@ -70,6 +70,10 @@ jobs:
       ref: ${{ needs.validate.outputs.sha }}
   security:
     needs: validate
+    # The reusable workflow declares an issue-sync job, skipped for release scans.
+    permissions:
+      contents: read
+      issues: write
     uses: ./.github/workflows/security.yml
     with:
       ref: ${{ needs.validate.outputs.sha }}
