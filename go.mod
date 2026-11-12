@@ -1,8 +1,6 @@
 module github.com/kernaxis/synolego
 
-go 1.26.0
-
-toolchain go1.26.10
+go 1.26.11
 
 require (
 	github.com/go-acme/lego/v4 v4.25.2

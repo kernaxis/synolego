@@ -32,7 +32,7 @@ Published binaries will be available on the [Releases page](https://github.com/k
 The release targets are Linux `amd64`, `386`, `armv7` and `arm64`.
 
 Until the first release is published, build from source on a machine with Git,
-Make and the Go toolchain declared in [`go.mod`](go.mod), currently Go 1.26.10:
+Make and the Go toolchain declared in [`go.mod`](go.mod), currently Go 1.26.11:
 
 ```sh
 git clone https://github.com/kernaxis/synolego.git

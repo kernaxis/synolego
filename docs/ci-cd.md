@@ -30,6 +30,11 @@ temporary files and synthetic certificates, not live ACME/DNS/DSM credentials.
 govulncheck fails for reachable vulnerabilities or scanner/database errors; no
 security check is silently allowed to fail.
 
+Dependency Review on pull requests requires Dependency graph to be enabled in
+[the repository security settings](https://github.com/kernaxis/synolego/settings/security_analysis).
+If GitHub reports that Dependency Review is unsupported, check this setting;
+the workflow keeps this failure blocking.
+
 CodeQL uses the same Go toolchain and a manual `go build -mod=readonly ./...`
 between initialization and analysis. This native build supplies its Go database;
 cross-compilation and packaging remain exclusive to releases.
