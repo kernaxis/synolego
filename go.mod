@@ -8,7 +8,7 @@ require (
 	github.com/mattn/go-isatty v0.0.20
 	github.com/urfave/cli/v2 v2.27.7
 	golang.org/x/net v0.60.0
-	software.sslmate.com/src/go-pkcs12 v0.6.0
+	software.sslmate.com/src/go-pkcs12 v0.7.4
 )
 
 require (
