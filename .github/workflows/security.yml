@@ -40,7 +40,7 @@ jobs:
       with:
         go-version-file: go.mod
     - name: Check reachable vulnerabilities
-      uses: kernaxis/ci-actions/govulncheck@7f7036c28a07d2232fb9c584c9b699edad8f0c8d # v0.1.0
+      uses: kernaxis/ci-actions/govulncheck@4c73aaf504f009b51ae37c1b46e948b448e957eb # v0.1.0
       with:
         report: ${{ github.ref == 'refs/heads/main' && !inputs.release && inputs.ref == '' }}
       env:
@@ -62,7 +62,7 @@ jobs:
       with:
         go-version-file: go.mod
     - name: Lint and audit workflows
-      uses: kernaxis/ci-actions/workflow-lint@7f7036c28a07d2232fb9c584c9b699edad8f0c8d # v0.1.0
+      uses: kernaxis/ci-actions/workflow-lint@4c73aaf504f009b51ae37c1b46e948b448e957eb # v0.1.0
       with:
         report: ${{ github.ref == 'refs/heads/main' && !inputs.release && inputs.ref == '' }}
   finding-issues:
@@ -78,7 +78,7 @@ jobs:
       cancel-in-progress: false
     steps:
     - name: Reconcile finding issues
-      uses: kernaxis/ci-actions/security-issues-sync@7f7036c28a07d2232fb9c584c9b699edad8f0c8d # v0.1.0
+      uses: kernaxis/ci-actions/security-issues-sync@4c73aaf504f009b51ae37c1b46e948b448e957eb # v0.1.0
   dependency-review:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
