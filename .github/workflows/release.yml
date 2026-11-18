@@ -65,7 +65,7 @@ jobs:
       id: tag
   ci:
     needs: validate
-    uses: ./.github/workflows/ci.yml
+    uses: ./.github/workflows/ci.yml # zizmor: ignore[self-repository] -- Same-commit relative call; actionlint does not support the newer $/ syntax.
     with:
       ref: ${{ needs.validate.outputs.sha }}
   security:
@@ -74,7 +74,7 @@ jobs:
     permissions:
       contents: read
       issues: write
-    uses: ./.github/workflows/security.yml
+    uses: ./.github/workflows/security.yml # zizmor: ignore[self-repository] -- Same-commit relative call; actionlint does not support the newer $/ syntax.
     with:
       ref: ${{ needs.validate.outputs.sha }}
       release: true
@@ -203,7 +203,7 @@ jobs:
         GH_TOKEN: ${{ github.token }}
         GH_REPO: ${{ github.repository }}
         GH_API_URL: ${{ github.api_url }}
-    - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+    - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2 # zizmor: ignore[superfluous-actions] -- Replacing the release publisher is out of scope for the CI actions migration.
       with:
         tag_name: ${{ needs.validate.outputs.tag }}
         target_commitish: ${{ needs.validate.outputs.sha }}
